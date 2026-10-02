@@ -1311,3 +1311,88 @@ class SessionMessagesMixin:
         if affected_ids:
             logger.info("Permanently cleared %d stale tool-call marker row(s) in state.db (#78148)", len(affected_ids))
         return _result(affected_ids, backup_path)
+
+    def redact_credentials_in_place(self, *, dry_run: bool = False, backup: bool = True) -> Dict[str, Any]:
+        """Redact secrets from already-persisted ``role == 'tool'`` rows (HER-225 backfill).
+
+        The persist-path scrub (``_durable_tool_result_content``) stops NEW tool results from leaking,
+        but every credential written before it shipped is still sitting in ``state.db`` in cleartext and
+        re-read into model context on session resume. This one-shot backfill walks the existing store and
+        rewrites any ``role == 'tool'`` row whose ``content`` (or ``api_content``) actually contains a
+        secret shape, in place — the same scrubber (``redact_sensitive_text(force=True)``) that now guards
+        the persist seam, so a row is only touched when the redactor genuinely masks something (no ``LIKE``/
+        ``GLOB`` false positives). Fail-closed: a raising redactor yields a sentinel, never the raw secret.
+
+        Only ``content`` / ``api_content`` are rewritten; every other column (id, tool_calls, timestamps,
+        ordering, markers) is left exactly as-is, so session replay and compression lineage are unaffected.
+        ``backup``: ``VACUUM INTO`` snapshot first (none when nothing changes).
+        """
+        from agent.redact import redact_sensitive_text
+
+        def _redact(text):
+            if not isinstance(text, str) or not text:
+                return text, False
+            try:
+                redacted = redact_sensitive_text(text, force=True)
+            except Exception:
+                # Fail closed: a broken/raising redactor must not leave the raw secret in the store.
+                redacted = "[redaction-unavailable]"
+            return redacted, (redacted != text)
+
+        def _find_affected(conn) -> List[Dict[str, Any]]:
+            cursor = conn.execute(
+                "SELECT id, content, api_content FROM messages "
+                "WHERE role = 'tool' AND (content IS NOT NULL OR api_content IS NOT NULL)")
+            affected = []
+            for row in cursor.fetchall():
+                cid = row["id"]
+                new_content, c_changed = _redact(row["content"])
+                new_api, a_changed = _redact(row["api_content"])
+                if c_changed or a_changed:
+                    affected.append({
+                        "id": cid,
+                        "content": new_content if c_changed else None,
+                        "api_content": new_api if a_changed else None,
+                    })
+            return affected
+
+        def _result(affected, backup_path=None):
+            return {"dry_run": dry_run, "rows_affected": len(affected),
+                    "row_ids": [a["id"] for a in affected], "backup_path": backup_path}
+
+        with self._read_ctx() as conn:
+            affected = _find_affected(conn)
+        if dry_run or not affected:
+            return _result(affected)
+
+        backup_path: Optional[str] = None
+        if backup:
+            import datetime
+            stamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            backup_path = str(self.db_path.with_name(f"{self.db_path.name}.pre-cred-redact-backup-{stamp}"))
+            with self._lock:
+                self._conn.execute("VACUUM INTO ?", (backup_path,))
+            logger.info("Backed up state.db to %s before credential-redaction write", backup_path)
+
+        def _do(conn):
+            # Re-scan inside the write transaction so a row written between the read and this point is
+            # still caught; the redactor is deterministic so this is idempotent under `_execute_write` retry.
+            rows = _find_affected(conn)
+            for r in rows:
+                sets, vals = [], []
+                if r["content"] is not None:
+                    sets.append("content = ?")
+                    vals.append(r["content"])
+                if r["api_content"] is not None:
+                    sets.append("api_content = ?")
+                    vals.append(r["api_content"])
+                if sets:
+                    vals.append(r["id"])
+                    conn.execute(f"UPDATE messages SET {', '.join(sets)} WHERE id = ?", vals)
+            return rows
+
+        affected = self._execute_write(_do)
+        if affected:
+            logger.info("Redacted credentials from %d already-persisted tool row(s) in state.db (HER-225)",
+                        len(affected))
+        return _result(affected, backup_path)

@@ -141,6 +141,22 @@ def build_sessions_parser(subparsers, *, cmd_sessions: Callable) -> None:
     _flag(sessions_clean_markers, "--no-backup", default=False,
         help="Skip the timestamped state.db backup taken before writing (not recommended)")
 
+    sessions_redact_credentials = sessions_subparsers.add_parser("redact-credentials",
+        help="Redact secrets from already-persisted tool results (HER-225 backfill)",
+        description="One-shot backfill for HER-225: rewrites, in place, every "
+            "role='tool' row whose content actually still contains a "
+            "credential (API key, token, PEM block, labelled secret) that "
+            "was persisted before the persist-path scrub shipped. Uses the "
+            "same fail-closed scrubber (redact_sensitive_text force=True) "
+            "as the live boundary, so a row is only touched when the "
+            "redactor genuinely masks something. Only the content / "
+            "api_content columns are rewritten; session replay, ordering, "
+            "and compression lineage are untouched.")
+    _flag(sessions_redact_credentials, "--dry-run", default=False,
+        help="Report the count and row ids that would be redacted without writing")
+    _flag(sessions_redact_credentials, "--no-backup", default=False,
+        help="Skip the timestamped state.db backup taken before writing (not recommended)")
+
     sessions_optimize_storage = sessions_subparsers.add_parser("optimize-storage",
         help="Migrate the search index to the compact v23 layout (reclaims disk on large DBs)",
         description="Rebuild the full-text search index in the compact v23 "
