@@ -17,7 +17,9 @@ jobs:
     # Standard runner (this fork does not provision the upstream 96-core larger
     # runner, which left this job queued indefinitely).
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # The full suite needs more than 30m on the 2-core standard runner (upstream
+    # sized its 30m budget for a 96-core larger runner this fork does not have).
+    timeout-minutes: 120
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
