@@ -116,6 +116,36 @@ def _durable_content(content: Any) -> Any:
     return "\n".join(txt) if txt else None
 
 
+def _durable_tool_result_content(content: Any) -> Any:
+    """Storage-boundary projection for ``role == "tool"`` rows.
+
+    Tool RESULTS are the credential leak that HER-225 measured (297 of 332 credential-bearing
+    messages were ``role: tool``): the secret arrives verbatim in command output / file reads /
+    diffs, and the persist path wrote it to state.db untouched. This is the "stop the refill" seam:
+    redact the *durable* copy with ``redact_sensitive_text(force=True)`` — the fail-closed scrub
+    for text leaving the process — so a credential can never be persisted raw and re-read into
+    model context on session resume.
+
+    Deliberately narrow:
+      * Only ``role == "tool"``: assistant content is already redacted upstream
+        (``_assistant_content_for_storage``) and tool-call *arguments* must stay raw for replay.
+      * The IN-MEMORY ``msg["content"]`` is NOT mutated — the model keeps the real value for the
+        current turn's tool replay; only the durable row is scrubbed.
+      * Benign tool output (the vast majority) passes through unchanged — ``redact_sensitive_text``
+        is a no-op on text with no secret shape.
+    """
+    durable = _durable_content(content)
+    if isinstance(durable, str):
+        try:
+            from agent.redact import redact_sensitive_text
+            return redact_sensitive_text(durable, force=True)
+        except Exception:
+            # Fail closed: a broken/raising redactor must never persist raw secrets — drop the
+            # content to a sentinel rather than leak it to the replayable store.
+            return "[redaction-unavailable]"
+    return durable
+
+
 def _persist_lock(agent):
     """Close and turn-start persistence can run on separate CLI threads: one critical section.
 
@@ -169,8 +199,13 @@ def _db_flush_row(agent, msg: Dict, is_current_turn_user: bool) -> Dict[str, Any
     ):
         api_content = content
     # Key order is the divert-JSONL wire order (divert_session_transcript_jsonl).
+    # role == "tool" rows are the tool RESULT — scrubbed at the storage boundary
+    # (see _durable_tool_result_content); every other role keeps _durable_content.
     row = {
-        "role": role, "content": _durable_content(content), "tool_name": msg.get("tool_name"),
+        "role": role, "content": (
+            _durable_tool_result_content(content) if role == "tool" else _durable_content(content)
+        ),
+        "tool_name": msg.get("tool_name"),
         "tool_calls": msg["tool_calls"] if isinstance(msg.get("tool_calls"), list) else None,
         "tool_call_id": msg.get("tool_call_id"), "finish_reason": msg.get("finish_reason"),
         **{k: msg.get(k) for k in _ROW_REASONING_KEYS},
