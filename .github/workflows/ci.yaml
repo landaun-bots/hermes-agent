@@ -15,9 +15,16 @@ name: CI
 # main-only automation uses protected environments in its own workflows.
 
 on:
-  pull_request:
+  # NOTE(fork): this repository is a FORK of NousResearch/hermes-agent. GitHub
+  # disallows a `pull_request`-triggered workflow from invoking reusable
+  # `workflow_call` sub-workflows on a fork — it auto-disables the orchestrator
+  # (`disabled_manually`) minutes after each re-enable. So the fork keys CI off
+  # `push` instead. Every PR branch is pushed to the fork, so `push` still
+  # validates each PR. The `detect` job re-derives a `pull_request` flag for
+  # non-main branches so the PR-only gates (history-check, review-labels,
+  # supply-chain, lockfile-diff) keep their identical behavior.
   push:
-    branches: [main]
+    branches: ['**']
 
 permissions:
   contents: read
@@ -27,7 +34,8 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+  # Non-main branch pushes are the fork's PRs: supersede older runs per branch.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────
@@ -55,7 +63,10 @@ jobs:
       mcp_catalog: ${{ steps.classify.outputs.mcp_catalog }}
       ci_review: ${{ steps.classify.outputs.ci_review }}
       ci_review_files: ${{ steps.classify.outputs.ci_review_files }}
-      event_name: ${{ github.event_name }}
+      # The fork runs on `push` (see the NOTE above the `on:` block), so map
+      # non-main branches back to their PR-trigger semantics for the
+      # downstream PR-only gates. Main stays `push` (post-merge fail-open).
+      event_name: ${{ github.ref == 'refs/heads/main' && 'push' || 'pull_request' }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Detect affected areas
@@ -306,7 +317,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Restore baseline cache (PR only)
-        if: github.event_name == 'pull_request'
+        if: github.ref != 'refs/heads/main'
         uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
           path: ci-timings-baseline.json
