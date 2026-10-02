@@ -56,9 +56,13 @@ jobs:
         run: |
           # For PRs, diff against the merge base with the target branch.
           # For pushes to main, diff against the previous commit on main.
+          # On a fork's push-triggered CI (no pull_request payload), there is
+          # no `github.base_ref`; fall back to `main` — every fork PR targets
+          # main, so its merge base with main is the correct diff baseline.
           if [ "${{ inputs.event_name }}" = "pull_request" ]; then
-            BASE_SHA=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
-            BASE_REF="origin/${{ github.base_ref }}"
+            BASE_BRANCH="${{ github.base_ref || 'main' }}"
+            BASE_SHA=$(git merge-base "origin/${BASE_BRANCH}" HEAD)
+            BASE_REF="origin/${BASE_BRANCH}"
           else
             BASE_SHA=$(git rev-parse HEAD~1 2>/dev/null || git rev-parse HEAD)
             BASE_REF="HEAD~1"

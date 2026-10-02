@@ -52,7 +52,11 @@ jobs:
           # Three-dot semantics by hand: diff from the merge base with the
           # target branch to the PR head, so changes that landed on main
           # after the branch point don't show up as this PR's doing.
-          BASE_SHA=$(git merge-base "origin/${{ github.base_ref }}" HEAD)
+          # On a fork's push-triggered CI (no pull_request payload) there is
+          # no `github.base_ref`; fall back to `main`, the target every fork
+          # PR branches from.
+          BASE_BRANCH="${{ github.base_ref || 'main' }}"
+          BASE_SHA=$(git merge-base "origin/${BASE_BRANCH}" HEAD)
           echo "Merge base: ${BASE_SHA}"
           python3 scripts/ci/lockfile_diff.py \
             --base "$BASE_SHA" \
