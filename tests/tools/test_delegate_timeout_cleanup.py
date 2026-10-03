@@ -35,7 +35,16 @@ class _SlowUnwindingChild:
         # Model the real child turn's finally path: it still performs session
         # activity/SQLite cleanup after the parent requests interruption.
         self.unwinding.set()
-        assert self.allow_finish.wait(timeout=2)
+        # Wait for the test thread to release the unwind gate with NO timer.
+        # The test always sets allow_finish in a ``finally``, so an unbounded
+        # wait can never leak this worker. A bounded ``timeout=2`` here was a
+        # flake source: under a loaded CI runner the test thread could take
+        # >2s to reach its ``allow_finish.set()``, the assert would fire, the
+        # worker unwound via exception, and the done-callback called close()
+        # before the test had observed "not closed" — reading as "close()
+        # raced the still-unwinding conversation thread" when the real cause
+        # was the timer, not a teardown ordering bug.
+        assert self.allow_finish.wait()
         self.finished.set()
         return {
             "final_response": "",

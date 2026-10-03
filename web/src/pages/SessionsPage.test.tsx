@@ -119,36 +119,46 @@ afterEach(async () => {
 });
 
 describe("SessionsPage per-row profile routing (#99387)", () => {
-  it("sends every per-row request to the row's owning profile, not the management default", async () => {
-    await renderSessionsPage([
-      { id: "sid-guanli", profile: "guanli", source: "cli", model: null, title: "Managed", started_at: 1, ended_at: null,
-        last_active: 1, is_active: false, message_count: 2, tool_call_count: 0, input_tokens: 1, output_tokens: 1, preview: "hi" },
-    ]);
+  it(
+    "sends every per-row request to the row's owning profile, not the management default",
+    // This is a multi-step integration test (expand → read, export, rename,
+    // delete) across five providers. It ~passes in <1s locally, but under the
+    // 2-core CI runner running typecheck + vitest + eslint + the electron
+    // suite concurrently it reliably pushes past the 5s default test timeout,
+    // which reads as a spurious "Test timed out in 5000ms" failure. Give it
+    // headroom rather than a razor-thin wall.
+    { timeout: 15000 },
+    async () => {
+      await renderSessionsPage([
+        { id: "sid-guanli", profile: "guanli", source: "cli", model: null, title: "Managed", started_at: 1, ended_at: null,
+          last_active: 1, is_active: false, message_count: 2, tool_call_count: 0, input_tokens: 1, output_tokens: 1, preview: "hi" },
+      ]);
 
-    // expand → transcript read
-    await act(async () => click(button("Delete session")!.closest("div.cursor-pointer")));
-    await waitFor(() => apiMocks.getSessionMessages.mock.calls.length > 0);
-    expect(apiMocks.getSessionMessages).toHaveBeenCalledWith("sid-guanli", "guanli");
+      // expand → transcript read
+      await act(async () => click(button("Delete session")!.closest("div.cursor-pointer")));
+      await waitFor(() => apiMocks.getSessionMessages.mock.calls.length > 0);
+      expect(apiMocks.getSessionMessages).toHaveBeenCalledWith("sid-guanli", "guanli");
 
-    await act(async () => click(button("Export session")));
-    expect(apiMocks.exportSessionUrl).toHaveBeenCalledWith("sid-guanli", "guanli");
+      await act(async () => click(button("Export session")));
+      expect(apiMocks.exportSessionUrl).toHaveBeenCalledWith("sid-guanli", "guanli");
 
-    await act(async () => click(button("Rename session")));
-    const input = document.querySelector<HTMLInputElement>('input[placeholder="Session title"]');
-    if (!input) throw new Error("rename input not rendered");
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Renamed");
-      input.dispatchEvent(new Event("input", { bubbles: true }));
-    });
-    await act(async () => click(button("Save title")));
-    expect(apiMocks.renameSession).toHaveBeenCalledWith("sid-guanli", "Renamed", "guanli");
+      await act(async () => click(button("Rename session")));
+      const input = document.querySelector<HTMLInputElement>('input[placeholder="Session title"]');
+      if (!input) throw new Error("rename input not rendered");
+      await act(async () => {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(input, "Renamed");
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      await act(async () => click(button("Save title")));
+      expect(apiMocks.renameSession).toHaveBeenCalledWith("sid-guanli", "Renamed", "guanli");
 
-    await act(async () => click(button("Delete session")));
-    await waitFor(() => Boolean(document.querySelector('[role="alertdialog"]')));
-    const confirm = Array.from(document.querySelectorAll('[role="alertdialog"] button')).find(
-      (b) => b.textContent?.trim() === "Delete",
-    );
-    await act(async () => click(confirm ?? null));
-    expect(apiMocks.deleteSession).toHaveBeenCalledWith("sid-guanli", "guanli");
-  });
+      await act(async () => click(button("Delete session")));
+      await waitFor(() => Boolean(document.querySelector('[role="alertdialog"]')));
+      const confirm = Array.from(document.querySelectorAll('[role="alertdialog"] button')).find(
+        (b) => b.textContent?.trim() === "Delete",
+      );
+      await act(async () => click(confirm ?? null));
+      expect(apiMocks.deleteSession).toHaveBeenCalledWith("sid-guanli", "guanli");
+    },
+  );
 });
