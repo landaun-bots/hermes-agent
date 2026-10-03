@@ -493,6 +493,7 @@ jobs:
     # encoding on Windows. Failure here blocks merge; the advisory
     # ``lint-diff`` job above runs independently so reviewers still get
     # the diff comment even when enforcement fails.
+    name: ruff enforcement (blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -525,6 +526,7 @@ jobs:
     # os.killpg, os.setsid, signal.SIGKILL without getattr fallback,
     # shebang scripts via subprocess, bare open() without encoding=, etc.
     # See scripts/check-windows-footguns.py for the full rule list.
+    name: Windows footguns (blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -562,6 +564,7 @@ jobs:
       # is recomputed server-side whenever main moves, and once it is unreachable no amount of
       # deepening ever reaches its parents (run 34285107265: 4 fetches, 4m15s, "no merge-base").
       - name: Public-surface diff vs base (advisory)
+        if: github.event_name == 'pull_request'
         continue-on-error: true
         # Bound the advisory step so a long deepen/fetch (e.g. a distant or missing
         # merge-base) can't consume the blocking job's 5-minute budget and cancel it.
@@ -634,6 +637,7 @@ jobs:
           key: node-modules-scripts-${{ runner.os }}-node26-npm12-${{ hashFiles('package-lock.json') }}
 
       - uses: ./.github/actions/retry
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
         with:
           command: npm ci
 
@@ -786,7 +790,6 @@ jobs:
         run: npm run build:fast
         working-directory: website
   history-check:
-    name: Reject PRs with no common ancestor on main
     needs: detect
     if: needs.detect.outputs.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -799,6 +802,7 @@ jobs:
           fetch-depth: 0 # full history both sides for merge-base
 
       - id: merge-base-check
+        name: Reject PRs with no common ancestor on main
         run: |
           # `git merge-base` exits non-zero AND prints nothing when the two
           # commits share no ancestor.  We check both conditions explicitly
@@ -833,15 +837,16 @@ jobs:
           echo "review_status=[]" > review-status.json
 
       - name: Upload review status artifact
+        if: always() && steps.merge-base-check.outcome != 'skipped'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          name: review-status-history-check
           path: review-status.json
           retention-days: 1
           overwrite: true
           if-no-files-found: ignore
   contributor-check:
-    name: review-status-contributor-check
     needs: detect
     if: needs.detect.outputs.python == 'true'
     runs-on: ubuntu-latest
@@ -929,9 +934,11 @@ jobs:
           fi
 
       - name: Upload review status artifact
+        if: always() && steps.check-emails.outcome != 'skipped'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          name: review-status-contributor-check
           path: review-status.json
           retention-days: 1
           overwrite: true
@@ -1049,15 +1056,16 @@ jobs:
           echo "review_status=${review_status}" > review-status.json
 
       - name: Upload review status artifact
+        if: always() && steps.verify.outcome != 'skipped'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          name: review-status-uv-lockfile
           path: review-status.json
           retention-days: 1
           overwrite: true
           if-no-files-found: ignore
   infographic-check:
-    name: Reject committed PR-infographic images
     needs: detect
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -1067,6 +1075,7 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - id: infographic-check
+        name: Reject committed PR-infographic images
         run: |
           # Match on the IMAGE, not on a directory name.  Keying this to
           # `infographic/` is what let `infograficos/` through in #70552 —
@@ -1186,9 +1195,11 @@ jobs:
           echo "review_status=${STATUS}" > review-status.json
 
       - name: Upload review status artifact
+        if: always() && steps.emit-status.outcome != 'skipped'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          name: review-status-lockfile-diff
           path: review-status.json
           retention-days: 1
           overwrite: true
@@ -1197,6 +1208,7 @@ jobs:
       - name: Upload diff artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          name: lockfile-diff
           path: /tmp/lockfile-diff.md
           retention-days: 1
           overwrite: true
@@ -1345,6 +1357,7 @@ jobs:
 
       - name: Emit review_status
         id: emit-status
+        if: always()
         env:
           FOUND: ${{ steps.scan.outputs.found }}
         run: |
@@ -1403,6 +1416,7 @@ jobs:
 
       - name: Emit review_status
         id: emit-status
+        if: always()
         env:
           FOUND: ${{ steps.bounds.outputs.found }}
         run: |
@@ -1432,6 +1446,7 @@ jobs:
           PYEOF
 
       - name: Fail on unbounded deps
+        if: steps.bounds.outputs.found == 'true'
         run: |
           echo "::error::PyPI dependencies without upper bounds detected. Add <next_major ceiling per CONTRIBUTING.md policy."
           exit 1
@@ -1477,9 +1492,11 @@ jobs:
           PYEOF
 
       - name: Upload review status artifact
+        if: always() && steps.merge.outcome != 'skipped'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          name: review-status-supply-chain
           path: review-status.json
           retention-days: 1
           overwrite: true
@@ -1543,15 +1560,18 @@ jobs:
           grep '^review_status=' "$GITHUB_OUTPUT" > review-status.json
 
       - name: Upload review status artifact
+        if: always() && steps.build-status.outcome != 'skipped'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          name: review-status-review-labels
           path: review-status.json
           retention-days: 1
           overwrite: true
           if-no-files-found: ignore
 
       - name: Fail on missing label
+        if: steps.label-check.outputs.ci_reviewed != 'true'
         run: |
           echo "::error::CI-sensitive changes require the ci-reviewed label. Add the label and re-run this check."
           exit 1
@@ -1576,6 +1596,8 @@ jobs:
     needs: osv-scan
     if: always()
     runs-on: ubuntu-latest
+    needs: osv-scan
+    if: always()
     outputs:
       review_status: ${{ steps.emit.outputs.review_status }}
     steps:
@@ -1585,6 +1607,7 @@ jobs:
       - name: Download SARIF result
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
+          name: OSV Scanner SARIF file
           path: /tmp/osv-results
         continue-on-error: true
 
@@ -1645,9 +1668,11 @@ jobs:
           echo "review_status=${STATUS}" > review-status.json
 
       - name: Upload review status artifact
+        if: always() && steps.emit.outcome != 'skipped'
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
+          name: review-status-osv-scanner
           path: review-status.json
           retention-days: 1
           overwrite: true
@@ -1826,4 +1851,5 @@ jobs:
         with:
           path: ci-timings-baseline.json
           key: ci-timings-baseline-${{ github.run_id }}
+
 
