@@ -118,7 +118,7 @@ def test_quickstart_refuses_when_nothing_fits(client, monkeypatch):
     assert "Local Models" in r.json()["detail"]
 
 
-def test_quickstart_runs_all_three_legs(client, monkeypatch, tmp_path):
+def test_quickstart_runs_all_three_legs(client, preflight_passes, monkeypatch, tmp_path):
     """Fresh machine: install runtime -> download recommended -> activate.
     Each leg is asserted by its observable call, in order."""
     calls: list[str] = []
@@ -179,7 +179,7 @@ def test_quickstart_runs_all_three_legs(client, monkeypatch, tmp_path):
     assert load_config()["local_runtime"]["enabled"] is True
 
 
-def test_quickstart_skips_satisfied_legs(client, monkeypatch):
+def test_quickstart_skips_satisfied_legs(client, preflight_passes, monkeypatch):
     """Runtime present and model already staged: the response says so and
     the job goes straight to activation."""
     calls: list[str] = []
@@ -220,6 +220,31 @@ def test_quickstart_skips_satisfied_legs(client, monkeypatch):
     assert job["status"] == "done", job["error"]
     assert "install" not in calls and "download" not in calls
     assert calls == ["assign"] or calls[-1] == "assign"
+
+
+@pytest.fixture
+def preflight_passes(monkeypatch):
+    """Deterministically pass ``_quickstart_target`` preflight on any host.
+
+    The catalog's ``recommended_entry`` / ``select_variant`` walk real
+    hardware-fit heuristics (VRAM budget, decode speed floors), so on a
+    machine where nothing "fits" or clears the pleasant floor they return
+    None and the POST 409s with "no automatic recommendation" — before any
+    of the per-leg stubs these tests assert on are even reached. Pin both to
+    a valid pick so the tests exercise the legs, not host hardware."""
+    from hermes_cli.local_runtime.catalog import CATALOG, VariantChoice
+
+    monkeypatch.setattr(
+        "hermes_cli.local_runtime.catalog.recommended_entry",
+        lambda budget, entries=None: (CATALOG[0], "best-fits"))
+    monkeypatch.setattr(
+        "hermes_cli.local_runtime.catalog.select_variant",
+        lambda entry, budget: VariantChoice(variant=entry.variants[0],
+                                            zero_spill=True,
+                                            reason_key="best-fits"))
+    monkeypatch.setattr(
+        "hermes_cli.web_routers.local_models._engine_too_old",
+        lambda min_engine: False)
 
 
 @pytest.fixture
