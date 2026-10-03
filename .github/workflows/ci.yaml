@@ -21,17 +21,14 @@ name: CI
 # main-only automation uses protected environments in its own workflows.
 
 on:
-  # The fork keys CI off `push` (every PR branch is pushed to the fork, so a
-  # main push and each PR-branch push both validate). The `detect` job
-  # re-derives a `pull_request` flag for non-main branches so the PR-only
-  # gates (history-check, review-labels, supply-chain, lockfile-diff) keep
-  # their identical behavior. (Inlining the workflow_call sub-workflows makes
-  # the reversible-workflow auto-disable irrelevant, but `push` is retained:
-  # it is proven — the full suite has run green on it — and `pull_request`
-  # would re-introduce a trigger surface that is not needed to validate the
-  # fork's PR branches.)
+  # Standard upstream trigger shape: PRs gate on `pull_request` (which carries
+  # the `github.event.pull_request.*` context the PR-only gates — history-
+  # check, review-labels, supply-chain, lockfile-diff — depend on), and a push
+  # to main validates post-merge. `pull_request` is safe again now that the
+  # workflow_call edges are inlined (they were the fork-auto-disable trigger).
   push:
-    branches: ['**']
+    branches: [main]
+  pull_request:
 
 permissions:
   contents: read
@@ -41,7 +38,7 @@ permissions:
 
 concurrency:
   group: ci-${{ github.ref }}
-  # Non-main branch pushes are the fork's PRs: supersede older runs per branch.
+  # Supersede older runs per ref (PR branch or main).
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
@@ -70,10 +67,10 @@ jobs:
       mcp_catalog: ${{ steps.classify.outputs.mcp_catalog }}
       ci_review: ${{ steps.classify.outputs.ci_review }}
       ci_review_files: ${{ steps.classify.outputs.ci_review_files }}
-      # The fork runs on `push` (see the NOTE above the `on:` block), so map
-      # non-main branches back to their PR-trigger semantics for the
-      # downstream PR-only gates. Main stays `push` (post-merge fail-open).
-      event_name: ${{ github.ref == 'refs/heads/main' && 'push' || 'pull_request' }}
+      # The event that actually triggered the run: `pull_request` for PR
+      # validation, `push` for post-merge main validation. Downstream PR-only
+      # gates key off this directly.
+      event_name: ${{ github.event_name }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - name: Detect affected areas
