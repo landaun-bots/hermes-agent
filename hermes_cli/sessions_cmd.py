@@ -831,6 +831,19 @@ def _cmd_clean_markers(db, args):
         print(f"✓ Cleared {report['rows_affected']} row(s).")
 
 
+def _cmd_redact_credentials(db, args):
+    print(f"{'Dry run — scanning' if args.dry_run else 'Scanning'} already-persisted tool results for credentials (HER-225)…")
+    report = db.redact_credentials_in_place(dry_run=args.dry_run, backup=not args.no_backup)
+    if report["rows_affected"] == 0:
+        print("✓ No credential-bearing tool rows found — nothing to redact.")
+    elif args.dry_run:
+        print(f"Would redact {report['rows_affected']} row(s): ids {report['row_ids']}")
+    else:
+        if report["backup_path"]:
+            print(f"  backup: {report['backup_path']}")
+        print(f"✓ Redacted credentials in {report['rows_affected']} row(s).")
+
+
 def _cmd_optimize_storage(db, args):
     db_path = db.db_path
     if not db.fts_optimize_available():
@@ -943,6 +956,7 @@ _DB_HANDLERS = {
     "archive": partial(_cmd_prune_or_archive, action="archive"), "unpin": partial(_cmd_pin, pinning=False),
     "retitle-skills": _cmd_retitle_skills, "browse": _cmd_browse, "optimize": _cmd_optimize,
     "clean-markers": _cmd_clean_markers, "optimize-storage": _cmd_optimize_storage,
+    "redact-credentials": _cmd_redact_credentials,
     "repair-routing": _cmd_repair_routing, "stats": _cmd_stats,
 }
 
