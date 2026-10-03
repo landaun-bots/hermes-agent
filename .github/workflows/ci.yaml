@@ -493,7 +493,6 @@ jobs:
     # encoding on Windows. Failure here blocks merge; the advisory
     # ``lint-diff`` job above runs independently so reviewers still get
     # the diff comment even when enforcement fails.
-    name: ruff enforcement (blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -526,7 +525,6 @@ jobs:
     # os.killpg, os.setsid, signal.SIGKILL without getattr fallback,
     # shebang scripts via subprocess, bare open() without encoding=, etc.
     # See scripts/check-windows-footguns.py for the full rule list.
-    name: Windows footguns (blocking)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -1596,8 +1594,6 @@ jobs:
     needs: osv-scan
     if: always()
     runs-on: ubuntu-latest
-    needs: osv-scan
-    if: always()
     outputs:
       review_status: ${{ steps.emit.outputs.review_status }}
     steps:
